@@ -14,7 +14,15 @@
     background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:12px 14px;
     font-size:14px; line-height:1.6;
   }
-  .panel h1 { font-size:15px; margin:0 0 8px; font-weight:700; }
+  .toggle {
+    display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:32px;
+    margin:0; padding:0; border:0; background:none; color:inherit; font:inherit; font-size:15px; font-weight:700;
+    text-align:left; cursor:pointer;
+  }
+  .toggle:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .panel.collapsed { width:auto; padding:4px 12px; }
+  #panelBody { margin-top:6px; }
+  [hidden] { display:none !important; }
   .row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
   .row label { white-space:nowrap; }
   input[type=range] { flex:1; accent-color:var(--accent); }
@@ -27,8 +35,11 @@
 <body>
 <div id="map"></div>
 
-<div class="panel">
-  <h1>地質図マップ</h1>
+<div class="panel" id="panel">
+  <button type="button" class="toggle" id="panelToggle" aria-expanded="true" aria-controls="panelBody">
+    <span>地質図マップ</span><span id="chev" aria-hidden="true">▲</span>
+  </button>
+  <div id="panelBody">
   <div class="row">
     <label><input type="checkbox" id="show" checked> 地質図を表示</label>
   </div>
@@ -43,8 +54,9 @@
       <option value="photo">航空写真</option>
     </select>
   </div>
-  <p class="hint">20万分の1の地質図です。拡大しすぎると粗くなります。</p>
+  <p class="hint">地図をタップすると、その地点の岩石と形成時代が出ます。20万分の1の地質図なので、拡大しすぎると粗くなります。</p>
   <p class="error" id="error" hidden>地質図を読み込めませんでした。ネットワークを確認してください。</p>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
@@ -85,6 +97,55 @@
   geology.on('loading', () => { errors = 0; });
   geology.on('tileerror', () => { errors++; });
   geology.on('load', () => { $('error').hidden = errors === 0; });
+
+  // パネルの開閉（スマホ幅では最初から閉じておく）
+  const panel = $('panel'), panelBody = $('panelBody'), panelToggle = $('panelToggle');
+  function setOpen(open) {
+    panelBody.hidden = !open;
+    panel.classList.toggle('collapsed', !open);
+    panelToggle.setAttribute('aria-expanded', String(open));
+    $('chev').textContent = open ? '▲' : '▼';
+  }
+  setOpen(!window.matchMedia('(max-width: 600px)').matches);
+  panelToggle.addEventListener('click', () => setOpen(panelBody.hidden));
+
+  // 地図をタップした地点の凡例（岩石・形成時代）を取得して表示する
+  function renderLegend(d) {
+    const box = document.createElement('div');
+    if (!d || !d.symbol) {
+      box.textContent = 'この地点のデータはありません（海や範囲外です）。';
+      return box;
+    }
+    [
+      ['岩相', d.lithology_ja],
+      ['大区分', d.group_ja],
+      ['形成時代', d.formationAge_ja],
+      ['記号', d.symbol],
+    ].forEach(([label, value]) => {
+      const p = document.createElement('div');
+      p.style.margin = '2px 0';
+      const b = document.createElement('b');
+      b.textContent = label + '：';
+      p.appendChild(b);
+      p.appendChild(document.createTextNode(value || '不明'));
+      box.appendChild(p);
+    });
+    return box;
+  }
+
+  map.on('click', async e => {
+    const popup = L.popup().setLatLng(e.latlng).setContent('読み込み中…').openOn(map);
+    const url = 'https://gbank.gsj.jp/seamless/v2/api/1.0/legend.json?point='
+      + e.latlng.lat.toFixed(6) + ',' + e.latlng.lng.toFixed(6);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      popup.setContent(renderLegend(await res.json()));
+    } catch (err) {
+      console.error(err);
+      popup.setContent('情報を取得できませんでした。');
+    }
+  });
 </script>
 </body>
 </html>
